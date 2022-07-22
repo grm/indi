@@ -219,6 +219,10 @@ class Arco
         bool reverse(bool enabled);
         bool isReversed();
 
+        // Firmware
+        bool getSerialNumber(std::string &response);
+        bool getFirmwareVersion(std::string &response);
+
     private:
         std::unique_ptr<Communication> m_Communication;
 };
