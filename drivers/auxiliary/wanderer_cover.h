@@ -1,5 +1,5 @@
 /*******************************************************************************
-  Copyright(c) 2015 Jasem Mutlaq. All rights reserved.
+  Copyright(c) 2022 Jérémie Klein. All rights reserved.
 
   Simple GPS Simulator
 
@@ -64,16 +64,40 @@ class WandererCover : public INDI::DefaultDevice, public INDI::LightBoxInterface
         virtual bool EnableLightBox(bool enable) override;
 
     private:
+        enum DustCapMotorOperationMode {
+            COLLISION,
+            LIMIT
+        };
+
         bool sendCommand(std::string command, char *response, bool waitForAnswer);
         bool getStartupData();
         bool switchOffLightBox();
 
-        bool Handshake();
+        bool handshake();
 
         // Status
         ITextVectorProperty StatusTP;
         IText StatusT[2] {};
 
+        // Firmware version
+        ITextVectorProperty FirmwareTP;
+        IText FirmwareT[1] {};
+
+        bool isVersionPriorTo20220920 = false;
+
+        // Operation Mode
+        ISwitchVectorProperty DustCapMotorOperationModeSP;
+        ISwitch DustCapMotorOperationModeS[2];
+    // DustCapMotorOperationMode operation_mode = COLLISION;
+        void updateOperationMode(char* res);
+        int numberOfStepsBeetweenOpenAndClose = 0;
+        void setButtonOperationMode(DustCapMotorOperationMode operation_mode);
+        bool processOperationModeSwitch(const char *dev, const char *name, ISState *states, char *names[], int n);
+        bool switchOperationMode();
+
+        void setParkCapStatusAsOpen();
+        void setParkCapStatusAsClosed();
+        void updateCoverStatus(char* res);
 
         int PortFD{ -1 };
 

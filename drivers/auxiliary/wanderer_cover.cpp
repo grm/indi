@@ -1,5 +1,5 @@
 /*******************************************************************************
-  Copyright(c) 2015 Jasem Mutlaq. All rights reserved.
+  Copyright(c) 2022 Jérémie Klein. All rights reserved.
 
   Wanderer cover V3
 
@@ -47,6 +47,7 @@ static std::unique_ptr<WandererCover> wanderercover(new WandererCover());
 #define HANDSHAKE_COMMAND "1500001\n"
 #define OPEN_COVER_COMMAND "1001\n"
 #define TURN_OFF_LIGHT_PANEL_COMMAND "9999\n"
+#define COLLISION_DETECTION_OPERATION_MODE_COMMAND "10000\n"
 
 WandererCover::WandererCover() : LightBoxInterface(this, true)
 {
@@ -62,6 +63,10 @@ bool WandererCover::initProperties()
     IUFillText(&StatusT[1], "Light", "Light", nullptr);
     IUFillTextVector(&StatusTP, StatusT, 2, getDeviceName(), "Status", "Status", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
 
+    // Firmware version
+    IUFillText(&FirmwareT[0], "Version", "Version", "pre 20220920");
+    IUFillTextVector(&FirmwareTP, FirmwareT, 1, getDeviceName(), "Firmware", "Firmware", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
+
     initDustCapProperties(getDeviceName(), MAIN_CONTROL_TAB);
     initLightBoxProperties(getDeviceName(), MAIN_CONTROL_TAB);
 
@@ -76,18 +81,21 @@ bool WandererCover::initProperties()
     serialConnection = new Connection::Serial(this);
     serialConnection->setDefaultBaudRate(Connection::Serial::B_19200);
     serialConnection->registerHandshake([&]()
-                                        { return Handshake(); });
+                                        { return handshake(); });
     registerConnection(serialConnection);
 
     return true;
 }
 
-bool WandererCover::Handshake()
+bool WandererCover::handshake()
 {
     PortFD = serialConnection->getPortFD();
     tcflush(PortFD, TCIOFLUSH);
-    int nbytes_read1 = 0, nbytes_written = 0, rc = -1;
-    char res1[64] = {0};
+    int nbytes_read_name = 0,  nbytes_read_version = 0, nbytes_written = 0, rc = -1;
+    char res_name[64] = {0};
+    char res_version[64] = {0};
+
+
     LOGF_DEBUG("CMD <%s>", HANDSHAKE_COMMAND);
     if ((rc = tty_write_string(PortFD, HANDSHAKE_COMMAND, &nbytes_written)) != TTY_OK)
     {
@@ -97,7 +105,7 @@ bool WandererCover::Handshake()
         return false;
     }
 
-    if ((rc = tty_read_section(PortFD, res1, 'A', 5, &nbytes_read1)) != TTY_OK)
+    if ((rc = tty_read_section(PortFD, res_name, 'A', 5, &nbytes_read_name)) != TTY_OK)
     {
         char errorMessage[MAXRBUF];
         tty_error_msg(rc, errorMessage, MAXRBUF);
@@ -105,13 +113,99 @@ bool WandererCover::Handshake()
         return false;
     }
 
-    res1[nbytes_read1 - 1] = '\0';
+    // We read version, prior to 20220920 it was not supported so some functionnality may not be available
+    // But some are working so cnnection is successful
+    if ((rc = tty_read_section(PortFD, res_version, 'A', 5, &nbytes_read_version)) != TTY_OK)
+    { 
+        char errorMessage[MAXRBUF];
+        tty_error_msg(rc, errorMessage, MAXRBUF);
+        isVersionPriorTo20220920 = true;
+        LOGF_INFO("Version not available: probably due to firmware version being pre 20220920. You should update the wanderer cover firmware to have all functionnalities", "");
+    } else {
+        // Some infos are only available in firmware ppre 20220920, such as firmware version, the cover status and the new operation mode
+        // Firmware version
+        res_version[nbytes_read_version - 1] = '\0';
+        IUSaveText(&FirmwareT[0], res_version);
+        IDSetText(&FirmwareTP, nullptr);
+        // Cover status
+        char res_cover_state[64] = {0};
+        int nbytes_read_cover_state = 0;
 
-    LOGF_DEBUG("RES <%s>", res1);
-    LOGF_INFO("Handshake successful:%s", res1);
+        if ((rc = tty_read_section(PortFD, res_cover_state, 'A', 5, &nbytes_read_cover_state)) != TTY_OK)
+        { 
+                char errorMessage[MAXRBUF];
+                tty_error_msg(rc, errorMessage, MAXRBUF);
+                isVersionPriorTo20220920 = true;
+                LOGF_ERROR("Device read error: %s", errorMessage);
+        }
+        updateCoverStatus(res_cover_state); 
+
+        // Operation mode available
+        char res_operation_mode[64] = {0};
+        int nbytes_read_operation_mode = 0;
+        IUFillSwitch(&DustCapMotorOperationModeS[COLLISION], "OPERATION_MODE_COLLISION", "Collision", ISS_OFF);
+        IUFillSwitch(&DustCapMotorOperationModeS[LIMIT], "OPERATION_MODE_LIMIT_POSITION", "Limit", ISS_OFF);
+        IUFillSwitchVector(&DustCapMotorOperationModeSP, DustCapMotorOperationModeS, 2, getDeviceName(), "OPERATION_MODE", "Operation Mode", MAIN_CONTROL_TAB, IP_RW, ISR_1OFMANY, 0,
+                    IPS_IDLE);
+
+        if ((rc = tty_read_section(PortFD, res_operation_mode, 'A', 5, &nbytes_read_operation_mode)) != TTY_OK)
+        { 
+                char errorMessage[MAXRBUF];
+                tty_error_msg(rc, errorMessage, MAXRBUF);
+                isVersionPriorTo20220920 = true;
+                LOGF_ERROR("Device read error: %s", errorMessage);
+        }
+
+        res_operation_mode[nbytes_read_operation_mode - 1] = '\0';
+        updateOperationMode(res_operation_mode); 
+    }
+
+    res_name[nbytes_read_name - 1] = '\0';
+
+    if (!isVersionPriorTo20220920) {
+
+    }
+
+    LOGF_DEBUG("RES <%s>", res_name);
+    LOGF_INFO("Handshake successful:%s", res_name);
     tcflush(PortFD, TCIOFLUSH);
     return true;
 }
+
+void WandererCover::updateCoverStatus(char* res) {
+    if (strcmp(res,"0")==0) {
+        setParkCapStatusAsClosed();
+    } else if (strcmp(res,"1")==0) {
+        setParkCapStatusAsOpen();
+    } else if (strcmp(res,"255")==0) {
+        //Unknown
+    }
+}
+
+void WandererCover::updateOperationMode(char* res) {
+    if (strcmp(res,"0")==0) {
+        setButtonOperationMode(COLLISION);
+    } else {
+        numberOfStepsBeetweenOpenAndClose = sscanf(res, "%d", &numberOfStepsBeetweenOpenAndClose);
+        setButtonOperationMode(LIMIT);
+    }
+}
+
+void WandererCover::setButtonOperationMode(DustCapMotorOperationMode operation_mode) {
+    if (operation_mode == COLLISION) {
+        IUResetSwitch(&DustCapMotorOperationModeSP);
+        DustCapMotorOperationModeS[COLLISION].s = ISS_ON;
+        DustCapMotorOperationModeS[LIMIT].s = ISS_OFF;
+        DustCapMotorOperationModeSP.s = IPS_OK;
+        IDSetSwitch(&DustCapMotorOperationModeSP, nullptr);
+    } else {
+        IUResetSwitch(&DustCapMotorOperationModeSP);
+        DustCapMotorOperationModeS[LIMIT].s = ISS_ON;
+        DustCapMotorOperationModeS[COLLISION].s = ISS_OFF;
+        DustCapMotorOperationModeSP.s = IPS_OK;
+        IDSetSwitch(&DustCapMotorOperationModeSP, nullptr);    }
+}
+
 
 void WandererCover::ISGetProperties(const char *dev)
 {
@@ -132,6 +226,10 @@ bool WandererCover::updateProperties()
         defineProperty(&LightIntensityNP);
         defineProperty(&StatusTP);
 
+        if (!isVersionPriorTo20220920) {
+            defineProperty(&FirmwareTP);
+        }
+
         updateLightBoxProperties();
 
         getStartupData();
@@ -142,6 +240,10 @@ bool WandererCover::updateProperties()
         deleteProperty(LightSP.name);
         deleteProperty(LightIntensityNP.name);
         deleteProperty(StatusTP.name);
+
+        if (! isVersionPriorTo20220920) {
+            deleteProperty(FirmwareTP.name);
+        }
 
         updateLightBoxProperties();
     }
@@ -187,6 +289,36 @@ bool WandererCover::ISNewSwitch(const char *dev, const char *name, ISState *stat
     return INDI::DefaultDevice::ISNewSwitch(dev, name, states, names, n);
 }
 
+bool WandererCover::processOperationModeSwitch(const char *dev, const char *name, ISState *states, char *names[],
+                int n) 
+{
+    if (strcmp(dev, getDeviceName()) == 0)
+    {
+        // Operation Mode
+        if (!strcmp(DustCapMotorOperationModeSP.name, name))
+        {
+            int prevIndex = IUFindOnSwitchIndex(&DustCapMotorOperationModeSP);
+            IUUpdateSwitch(&DustCapMotorOperationModeSP, states, names, n);
+            
+            bool rc = switchOperationMode();
+
+            DustCapMotorOperationModeSP.s = rc ? IPS_OK : IPS_ALERT;
+
+            if (!rc)
+            {
+                IUResetSwitch(&DustCapMotorOperationModeSP);
+                DustCapMotorOperationModeS[prevIndex].s = ISS_ON;
+            }
+
+            IDSetSwitch(&DustCapMotorOperationModeSP, nullptr); 
+
+            return true;
+        }
+    }
+
+    return false;
+}
+
 bool WandererCover::ISSnoopDevice(XMLEle *root)
 {
     snoopLightBox(root);
@@ -229,13 +361,18 @@ IPState WandererCover::ParkCap()
     if (!sendCommand(CLOSE_COVER_COMMAND, response, false))
         return IPS_ALERT;
 
+    setParkCapStatusAsClosed();
+    return IPS_OK;
+}
+
+void WandererCover::setParkCapStatusAsClosed()
+{
     IUSaveText(&StatusT[0], "Closed");
     IUResetSwitch(&ParkCapSP);
     ParkCapS[0].s = ISS_ON;
     ParkCapSP.s = IPS_OK;
     LOG_INFO("Cover closed.");
     IDSetSwitch(&ParkCapSP, nullptr);
-    return IPS_OK;
 }
 
 IPState WandererCover::UnParkCap()
@@ -244,14 +381,18 @@ IPState WandererCover::UnParkCap()
     if (!sendCommand(OPEN_COVER_COMMAND, response, false))
         return IPS_ALERT;
 
-    // Set cover status to random value outside of range to force it to refresh
+    setParkCapStatusAsOpen();
+    return IPS_OK;
+}
+
+void WandererCover::setParkCapStatusAsOpen()
+{
     IUSaveText(&StatusT[0], "Open");
     IUResetSwitch(&ParkCapSP);
     ParkCapS[1].s = ISS_ON;
     ParkCapSP.s = IPS_OK;
     LOG_INFO("Cover open.");
     IDSetSwitch(&ParkCapSP, nullptr);
-    return IPS_OK;
 }
 
 bool WandererCover::EnableLightBox(bool enable)
@@ -272,6 +413,17 @@ bool WandererCover::EnableLightBox(bool enable)
     }
 
     return false;
+}
+
+bool WandererCover::switchOperationMode() {
+    if (DustCapMotorOperationModeS[COLLISION].s == ISS_ON) {
+        // TODO : manage open and close state
+    } else {
+        char response[WANDERER_RESPONSE_SIZE];
+        if (!sendCommand(COLLISION_DETECTION_OPERATION_MODE_COMMAND, response, false))
+            return false;
+    }
+    return true;
 }
 
 bool WandererCover::switchOffLightBox()
