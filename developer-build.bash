@@ -35,7 +35,6 @@ BUILD_DIR=/dev/shm/indi-build
 
 
 
-
 # A useful short tutorial on getopt:
 # https://wiki.bash-hackers.org/howto/getopts_tutorial
 while getopts ":o:j:f" opt; do
