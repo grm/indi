@@ -153,6 +153,8 @@ class Telescope : public DefaultDevice
         {
             DOME_IGNORED,       /*!< Dome is ignored. Mount can park or unpark irrespective of dome parking status. */
             DOME_LOCKS,         /*!< Dome locks. Mount can only unpark if dome is already unparked. */
+            DOME_PARKS,         /*!< Mount parks when dome is parking/closed. */
+            DOME_LOCKS_AND_PARKS /*!< Both lock and park behaviors enabled. */
         };
 
         /**

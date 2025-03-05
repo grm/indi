@@ -79,8 +79,10 @@ bool Telescope::initProperties()
 
     // Use locking if dome is closed (and or) park scope if dome is closing
     // @INDI_STANDARD_PROPERTY@
-    DomePolicySP[DOME_IGNORED].fill("DOME_IGNORED", "Dome ignored", ISS_ON);
-    DomePolicySP[DOME_LOCKS].fill("DOME_LOCKS", "Dome locks", ISS_OFF);
+    DomePolicySP[DOME_IGNORED].fill("DOME_IGNORED", "Ignored", ISS_ON);
+    DomePolicySP[DOME_LOCKS].fill("DOME_LOCKS", "Locks Only", ISS_OFF);
+    DomePolicySP[DOME_PARKS].fill("DOME_PARKS", "Parks Only", ISS_OFF);
+    DomePolicySP[DOME_LOCKS_AND_PARKS].fill("DOME_LOCKS_AND_PARKS", "Locks & Parks", ISS_OFF);
     DomePolicySP.fill(getDeviceName(), "DOME_POLICY", "Dome Policy",  OPTIONS_TAB, IP_RW,
                       ISR_1OFMANY, 60, IPS_IDLE);
 
@@ -549,18 +551,33 @@ bool Telescope::ISSnoopDevice(XMLEle *root)
         else if (!strcmp(propName, "DOME_PARK") && deviceName == ActiveDeviceTP[ACTIVE_DOME].getText())
         {
             // This is handled by Watchdog driver.
-            // Mount shouldn't park due to dome closing in INDI::Telescope
-#if 0
-            if (strcmp(findXMLAttValu(root, "state"), "Ok"))
+            if (!strcmp(findXMLAttValu(root, "state"), "Ok"))
             {
-                // Dome options is dome parks or both and dome is parking.
-                if ((DomeClosedLockT[2].s == ISS_ON || DomeClosedLockT[3].s == ISS_ON) && !IsLocked && !IsParked)
+                bool prevState = IsLocked;
+                for (ep = nextXMLEle(root, 1); ep != nullptr; ep = nextXMLEle(root, 0))
+                {
+                    const char *elemName = findXMLAttValu(ep, "name");
+
+                    if (!IsLocked && (!strcmp(elemName, "PARK")) && !strcmp(pcdataXMLEle(ep), "On"))
+                        IsLocked = true;
+                    else if (IsLocked && (!strcmp(elemName, "UNPARK")) && !strcmp(pcdataXMLEle(ep), "On"))
+                        IsLocked = false;
+                }
+                if (prevState != IsLocked && (DomePolicySP[DOME_LOCKS].getState() == ISS_ON || 
+                    DomePolicySP[DOME_LOCKS_AND_PARKS].getState() == ISS_ON))
+                    LOGF_INFO("Dome status changed. Lock is set to: %s", IsLocked ? "locked" : "unlock");
+            }
+            else if (strcmp(findXMLAttValu(root, "state"), "Ok"))
+            {
+                if ((DomePolicySP[DOME_PARKS].getState() == ISS_ON || 
+                     DomePolicySP[DOME_LOCKS_AND_PARKS].getState() == ISS_ON) && 
+                    !IsLocked && !IsParked)
                 {
                     for (ep = nextXMLEle(root, 1); ep != nullptr; ep = nextXMLEle(root, 0))
                     {
-                        const char * elemName = findXMLAttValu(ep, "name");
-                        if (( (!strcmp(elemName, "SHUTTER_CLOSE") || !strcmp(elemName, "PARK"))
-                                && !strcmp(pcdataXMLEle(ep), "On")))
+                        const char *elemName = findXMLAttValu(ep, "name");
+                        if ((!strcmp(elemName, "SHUTTER_CLOSE") || !strcmp(elemName, "PARK")) && 
+                            !strcmp(pcdataXMLEle(ep), "On"))
                         {
                             RememberTrackState = TrackState;
                             Park();
@@ -568,24 +585,7 @@ bool Telescope::ISSnoopDevice(XMLEle *root)
                         }
                     }
                 }
-            } // Dome is changing state and Dome options is lock or both. d
-            else
-#endif
-                if (!strcmp(findXMLAttValu(root, "state"), "Ok"))
-                {
-                    bool prevState = IsLocked;
-                    for (ep = nextXMLEle(root, 1); ep != nullptr; ep = nextXMLEle(root, 0))
-                    {
-                        const char *elemName = findXMLAttValu(ep, "name");
-
-                        if (!IsLocked && (!strcmp(elemName, "PARK")) && !strcmp(pcdataXMLEle(ep), "On"))
-                            IsLocked = true;
-                        else if (IsLocked && (!strcmp(elemName, "UNPARK")) && !strcmp(pcdataXMLEle(ep), "On"))
-                            IsLocked = false;
-                    }
-                    if (prevState != IsLocked && (DomePolicySP[DOME_LOCKS].getState() == ISS_ON))
-                        LOGF_INFO("Dome status changed. Lock is set to: %s", IsLocked ? "locked" : "unlock");
-                }
+            }
             return true;
         }
     }
