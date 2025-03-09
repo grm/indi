@@ -387,21 +387,11 @@ IPState WandererCover::ParkCap()
     return IPS_OK;
 }
 
-void WandererCover::setParkCapStatusAsClosed()
-{
-    IUSaveText(&StatusT[0], "Closed");
-    ParkCapSP.reset();
-    ParkCapSP[0].setState(ISS_ON);
-    ParkCapSP.setState(IPS_OK);
-    LOG_INFO("Cover closed.");
-    ParkCapSP.apply();
-}
-
 IPState WandererCover::UnParkCap()
 {
     if (NumberOfStepsBeetweenOpenAndCloseState == 0)
     {
-        LOG_ERROR("The number of steps is 0 meaning the falt panel may hit an obstacle. You should define opening and closing position first.");
+        LOG_ERROR("The number of steps is 0 meaning the flat panel may hit an obstacle. You should define opening and closing position first.");
         return IPS_ALERT;
     }
 
@@ -426,9 +416,21 @@ IPState WandererCover::UnParkCap()
     return IPS_OK;
 }
 
+void WandererCover::setParkCapStatusAsClosed()
+{
+    IUSaveText(&StatusT[0], "Closed");
+    IDSetText(&StatusTP, nullptr);
+    ParkCapSP.reset();
+    ParkCapSP[0].setState(ISS_ON);
+    ParkCapSP.setState(IPS_OK);
+    LOG_INFO("Cover closed.");
+    ParkCapSP.apply();
+}
+
 void WandererCover::setParkCapStatusAsOpen()
 {
     IUSaveText(&StatusT[0], "Open");
+    IDSetText(&StatusTP, nullptr);
     ParkCapSP.reset();
     ParkCapSP[1].setState(ISS_ON);
     ParkCapSP.setState(IPS_OK);
@@ -438,12 +440,6 @@ void WandererCover::setParkCapStatusAsOpen()
 
 bool WandererCover::EnableLightBox(bool enable)
 {
-    if (ParkCapSP[1].getState() == ISS_ON)
-    {
-        LOG_ERROR("Cannot control light while cap is unparked.");
-        return false;
-    }
-
     if (enable)
     {
         return SetLightBoxBrightness(255);
@@ -475,6 +471,7 @@ bool WandererCover::switchOffLightBox()
 void WandererCover::setLightBoxStatusAsSwitchedOff()
 {
     IUSaveText(&StatusT[1], "Off");
+    IDSetText(&StatusTP, nullptr);
     LightSP[0].setState(ISS_OFF);
     LightSP[1].setState(ISS_ON);
     LightIntensityNP[0].setValue(0);
@@ -549,6 +546,16 @@ void WandererCover::setLightBoxBrightnesStatusToValue(uint16_t value)
 {
     LightIntensityNP[0].setValue(value);
     LightIntensityNP.apply();
+    if (value == 0)
+    {
+        setLightBoxStatusAsSwitchedOff();
+    } else {
+        IUSaveText(&StatusT[1], "On");
+        IDSetText(&StatusTP, nullptr);
+        LightSP[0].setState(ISS_ON);
+        LightSP[1].setState(ISS_OFF);
+        LightSP.apply();
+    }
     LOGF_INFO("Brightness set to %d.", value);
 }
 
