@@ -50,6 +50,14 @@ class WandererCover : public INDI::DefaultDevice, public INDI::LightBoxInterface
         virtual bool ISNewNumber(const char *dev, const char *name, double values[], char *names[], int n) override;
         virtual bool ISSnoopDevice(XMLEle *root) override;
 
+        // Cover state
+        bool isCoverOpen { false };
+        bool isCoverCurrentlyOpen() const { return isCoverOpen; }
+
+        // Light box state
+        bool isLightOn { false };
+        bool isLightCurrentlyOn() const { return isLightOn; }
+
     protected:
         const char *getDefaultName() override;
 
