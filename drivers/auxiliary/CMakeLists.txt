@@ -357,3 +357,11 @@ SET(dragonlight_SRC
 add_executable(indi_dragon_light ${dragonlight_SRC})
 target_link_libraries(indi_dragon_light indidriver ${HTTPLIB_LIBRARY})
 install(TARGETS indi_dragon_light RUNTIME DESTINATION bin)
+
+########### UPS Safety ###########
+set(indi_ups_safety_SRC
+    ups_safety.cpp)
+
+add_executable(indi_ups_safety ${indi_ups_safety_SRC})
+target_link_libraries(indi_ups_safety indidriver)
+install(TARGETS indi_ups_safety RUNTIME DESTINATION bin)

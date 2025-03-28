@@ -877,6 +877,10 @@
             <driver name="Simulator IO">indi_simulator_io</driver>
             <version>1.0</version>
         </device>
+        <device label="UPS Safety" manufacturer="Others">
+            <driver name="UPS Safety">indi_ups_safety</driver>
+            <version>1.0</version>
+        </device>        
     </devGroup>
     <devGroup group="Domes">
         <device label="ScopeDome Dome" manufacturer="ScopeDome">
