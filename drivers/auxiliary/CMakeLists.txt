@@ -357,3 +357,11 @@ SET(dragonlight_SRC
 add_executable(indi_dragon_light ${dragonlight_SRC})
 target_link_libraries(indi_dragon_light indidriver ${HTTPLIB_LIBRARY})
 install(TARGETS indi_dragon_light RUNTIME DESTINATION bin)
+
+# ########## Discord Notifier ###############
+SET(discord_notifier_SRC
+    discord_notifier.cpp)
+
+add_executable(indi_discord_notifier ${discord_notifier_SRC})
+target_link_libraries(indi_discord_notifier indidriver ${CURL_LIBRARIES})
+install(TARGETS indi_discord_notifier RUNTIME DESTINATION bin)
