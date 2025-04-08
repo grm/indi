@@ -25,7 +25,7 @@
 
 static std::unique_ptr<UPSSafety> upsSafety(new UPSSafety());
 
-UPSSafety::UPSSafety()
+UPSSafety::UPSSafety() : INDI::WeatherInterface(this)
 {
     setVersion(1, 0);
 
@@ -42,7 +42,14 @@ UPSSafety::~UPSSafety()
 bool UPSSafety::initProperties()
 {
     INDI::DefaultDevice::initProperties();
-
+    
+    // Initialize WeatherInterface
+    INDI::WeatherInterface::initProperties("SAFETY_GROUP", MAIN_CONTROL_TAB);
+    
+    // Add UPS Safety parameter
+    addParameter("UPS_SAFETY", "UPS Safety", 0, 1, 0);  // min=0 (safe), max=1 (warning), 2=danger
+    setCriticalParameter("UPS_SAFETY");
+    
     // UPS Connection Settings - moved to CONNECTION_TAB to be available before connecting
     UPSConnectionTP[UPS_NAME].fill("UPS_NAME", "UPS Name", "ups");
     UPSConnectionTP.fill(getDeviceName(), "UPS_CONNECTION", "UPS Connection", CONNECTION_TAB, IP_RW, 60, IPS_IDLE);
@@ -210,6 +217,7 @@ bool UPSSafety::Handshake()
 bool UPSSafety::updateProperties()
 {
     INDI::DefaultDevice::updateProperties();
+    INDI::WeatherInterface::updateProperties();
 
     if (isConnected())
     {
@@ -442,6 +450,16 @@ void UPSSafety::processUPSState(const char *status)
     StatusLP.apply();
 }
 
+// Implement WeatherInterface method
+IPState UPSSafety::updateWeather()
+{
+    if (!isConnected())
+        return IPS_ALERT;
+    
+    // Update is handled directly by TimerHit
+    return IPS_OK;
+}
+
 void UPSSafety::checkSafetyTriggers()
 {
     double batteryCharge = BatteryNP[BATTERY_CHARGE].getValue();
@@ -454,6 +472,7 @@ void UPSSafety::checkSafetyTriggers()
         // Critical level (2 = Danger)
         SafetyParameterNP[PARAM_SAFETY_STATUS].setValue(2);
         SafetyParameterNP.setState(IPS_ALERT);
+        setParameterValue("UPS_SAFETY", 2);
 
         if (!m_CriticalBatteryTriggered)
         {
@@ -468,6 +487,7 @@ void UPSSafety::checkSafetyTriggers()
         // Warning level (1 = Warning)
         SafetyParameterNP[PARAM_SAFETY_STATUS].setValue(1);
         SafetyParameterNP.setState(IPS_BUSY);
+        setParameterValue("UPS_SAFETY", 1);
 
         if (!m_LowBatteryTriggered)
         {
@@ -482,12 +502,16 @@ void UPSSafety::checkSafetyTriggers()
         // Safe level (0 = Safe)
         SafetyParameterNP[PARAM_SAFETY_STATUS].setValue(0);
         SafetyParameterNP.setState(IPS_OK);
+        setParameterValue("UPS_SAFETY", 0);
         m_LowBatteryTriggered = false;
         m_CriticalBatteryTriggered = false;
     }
 
     // Update the safety parameter
     SafetyParameterNP.apply();
+    
+    // Also ensure weather parameters are updated
+    critialParametersLP.apply();
 }
 
 bool UPSSafety::ISNewText(const char *dev, const char *name, char *texts[], char *names[], int n)
@@ -552,6 +576,7 @@ bool UPSSafety::ISNewNumber(const char *dev, const char *name, double values[], 
 bool UPSSafety::saveConfigItems(FILE *fp)
 {
     INDI::DefaultDevice::saveConfigItems(fp);
+    INDI::WeatherInterface::saveConfigItems(fp);
 
     UPSConnectionTP.save(fp);
     SafetyTriggersNP.save(fp);

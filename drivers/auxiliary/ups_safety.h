@@ -24,13 +24,14 @@
 #include "indipropertynumber.h"
 #include "indipropertylight.h"
 #include "connectionplugins/connectiontcp.h"
+#include "indiweatherinterface.h"
 
 namespace Connection
 {
 class TCP;
 }
 
-class UPSSafety : public INDI::DefaultDevice
+class UPSSafety : public INDI::DefaultDevice, public INDI::WeatherInterface
 {
     public:
         UPSSafety();
@@ -47,6 +48,9 @@ class UPSSafety : public INDI::DefaultDevice
         virtual bool Connect() override;
         virtual bool Disconnect() override;
         virtual void TimerHit() override;
+        
+        // Implement WeatherInterface method
+        virtual IPState updateWeather() override;
 
         // Polling period
         virtual uint32_t getCurrentPollingPeriod() { return 2000; }
