@@ -65,6 +65,10 @@ bool WandererEclipse::initProperties()
     FirmwareTP[FIRMWARE_VERSION].fill("FIRMWARE_VERSION", "Firmware Version", "Unknown");
     FirmwareTP.fill(getDeviceName(), "FIRMWARE_INFO", "Firmware", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
 
+    // Voltage info
+    VoltageNP[VOLTAGE].fill("VOLTAGE", "Voltage", "%.2f", 0.0, 30.0, 0.01, 0.0);
+    VoltageNP.fill(getDeviceName(), "VOLTAGE_INFO", "Voltage", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
+
     setDefaultPollingPeriod(2000);
 
     serialConnection = new Connection::Serial(this);
@@ -89,11 +93,13 @@ bool WandererEclipse::updateProperties()
         FirmwareTP[FIRMWARE_VERSION].setText(firmwareStr);
         defineProperty(FirmwareTP);
         defineProperty(TorqueSP);
+        defineProperty(VoltageNP);
     }
     else
     {
         deleteProperty(FirmwareTP);
         deleteProperty(TorqueSP);
+        deleteProperty(VoltageNP);
     }
 
     DI::updateProperties();
@@ -132,9 +138,15 @@ bool WandererEclipse::ISNewSwitch(const char *dev, const char *name, ISState *st
             }
             if (newTorque != -1 && newTorque != torqueLevel)
             {
-                // Send torque command: 2000 (low), 2001 (medium), 2002 (high)
+                // Send torque command: 3110 (low), 3160 (medium), 3190 (high)
                 char cmd[8];
-                snprintf(cmd, sizeof(cmd), "20%d", newTorque);
+                if (newTorque == TORQUE_LOW)
+                    snprintf(cmd, sizeof(cmd), "3110");
+                else if (newTorque == TORQUE_MEDIUM)
+                    snprintf(cmd, sizeof(cmd), "3160");
+                else if (newTorque == TORQUE_HIGH)
+                    snprintf(cmd, sizeof(cmd), "3190");
+                
                 if (sendCommand(cmd))
                 {
                     torqueLevel = newTorque;
@@ -204,36 +216,126 @@ bool WandererEclipse::requestStatus()
     std::lock_guard<std::timed_mutex> lock(serialPortMutex);
     PortFD = serialConnection->getPortFD();
     tcflush(PortFD, TCIOFLUSH);
-    char buffer[512] = {0};
-    int nbytes_read = 0, rc = -1;
-    // Send status request command: 1500001\n
+    
+    // Send status request command: 1500001
     if (!sendCommand("1500001"))
         return false;
 
-    // Read response (should be a single line)
-    if ((rc = tty_read_section(PortFD, buffer, '\n', 2, &nbytes_read)) != TTY_OK)
+    // Read device name first (should be "WandererEclipse")
+    char deviceName[64] = {0};
+    int nbytes_read = 0, rc = -1;
+    
+    if ((rc = tty_read_section(PortFD, deviceName, 'A', 5, &nbytes_read)) != TTY_OK)
     {
         if (rc == TTY_TIME_OUT)
         {
-            LOG_DEBUG("Timeout reading from device, will try again later");
+            LOG_DEBUG("Timeout reading device name, will try again later");
             return true;
         }
         char errorMessage[MAXRBUF];
         tty_error_msg(rc, errorMessage, MAXRBUF);
-        LOGF_ERROR("Failed to read data from device. Error: %s", errorMessage);
+        LOGF_ERROR("Failed to read device name. Error: %s", errorMessage);
         return false;
     }
-    return parseDeviceStatus(buffer);
+    deviceName[nbytes_read - 1] = '\0';
+    LOGF_DEBUG("Device name: %s", deviceName);
+
+    // Verify that this is indeed a WandererEclipse device
+    if (strcmp(deviceName, "WandererEclipse") != 0)
+    {
+        LOGF_ERROR("Device identification failed. Expected 'WandererEclipse', got '%s'", deviceName);
+        return false;
+    }
+    LOG_INFO("Successfully identified WandererEclipse device");
+
+    // Read firmware version (Field 1)
+    char firmwareVersion[64] = {0};
+    if ((rc = tty_read_section(PortFD, firmwareVersion, 'A', 5, &nbytes_read)) != TTY_OK)
+    {
+        char errorMessage[MAXRBUF];
+        tty_error_msg(rc, errorMessage, MAXRBUF);
+        LOGF_ERROR("Failed to read firmware version. Error: %s", errorMessage);
+        return false;
+    }
+    firmwareVersion[nbytes_read - 1] = '\0';
+    LOGF_DEBUG("Firmware version: %s", firmwareVersion);
+    
+    // Parse firmware version (YYYYMMDD format)
+    int firmwareDate = 0;
+    if (sscanf(firmwareVersion, "%d", &firmwareDate) == 1)
+    {
+        firmware = firmwareDate;
+        char firmwareStr[16];
+        snprintf(firmwareStr, sizeof(firmwareStr), "%d", firmware);
+        FirmwareTP[FIRMWARE_VERSION].setText(firmwareStr);
+        FirmwareTP.apply();
+    }
+
+    // Read motor torque (Field 2)
+    char motorTorque[64] = {0};
+    if ((rc = tty_read_section(PortFD, motorTorque, 'A', 5, &nbytes_read)) != TTY_OK)
+    {
+        char errorMessage[MAXRBUF];
+        tty_error_msg(rc, errorMessage, MAXRBUF);
+        LOGF_ERROR("Failed to read motor torque. Error: %s", errorMessage);
+        return false;
+    }
+    motorTorque[nbytes_read - 1] = '\0';
+    LOGF_DEBUG("Motor torque: %s", motorTorque);
+    
+    // Parse motor torque and update UI
+    int torqueValue = 0;
+    if (sscanf(motorTorque, "%d", &torqueValue) == 1)
+    {
+        int newTorqueLevel = -1;
+        if (torqueValue == 110)
+            newTorqueLevel = TORQUE_LOW;
+        else if (torqueValue == 160)
+            newTorqueLevel = TORQUE_MEDIUM;
+        else if (torqueValue == 190)
+            newTorqueLevel = TORQUE_HIGH;
+        
+        if (newTorqueLevel != -1 && newTorqueLevel != torqueLevel)
+        {
+            torqueLevel = newTorqueLevel;
+            for (int i = 0; i < 3; i++)
+                TorqueSP[i].setState(i == newTorqueLevel ? ISS_ON : ISS_OFF);
+            TorqueSP.setState(IPS_OK);
+            TorqueSP.apply();
+        }
+    }
+
+    // Read voltage (Field 3)
+    char voltage[64] = {0};
+    if ((rc = tty_read_section(PortFD, voltage, 'A', 5, &nbytes_read)) != TTY_OK)
+    {
+        char errorMessage[MAXRBUF];
+        tty_error_msg(rc, errorMessage, MAXRBUF);
+        LOGF_ERROR("Failed to read voltage. Error: %s", errorMessage);
+        return false;
+    }
+    voltage[nbytes_read - 1] = '\0';
+    LOGF_DEBUG("Voltage: %s", voltage);
+    
+    // Parse voltage (xx.xx format)
+    float voltageValue = 0.0f;
+    if (sscanf(voltage, "%f", &voltageValue) == 1)
+    {
+        this->voltageValue = voltageValue;
+        VoltageNP[VOLTAGE].setValue(voltageValue);
+        VoltageNP.setState(IPS_OK);
+        VoltageNP.apply();
+        LOGF_INFO("Device voltage: %.2fV", voltageValue);
+    }
+
+    return true;
 }
 
 bool WandererEclipse::parseDeviceStatus(const char *data)
 {
-    // Example: WandererTilterM54A***A***A***A***A\n
-    // TODO: Parse the status string according to the protocol in the image
-    // Set firmware, isOpen, etc.
-    // For now, just log the data
-    LOGF_DEBUG("Status Data: %s", data);
-    // Example parsing (to be implemented as per actual protocol)
+    // This method is now deprecated as parsing is done directly in requestStatus()
+    // Keep for backward compatibility but log the data
+    LOGF_DEBUG("Legacy parseDeviceStatus called with data: %s", data);
     return true;
 }
 
@@ -261,5 +363,6 @@ bool WandererEclipse::saveConfigItems(FILE *fp)
 {
     INDI::DefaultDevice::saveConfigItems(fp);
     TorqueSP.save(fp);
+    VoltageNP.save(fp);
     return true;
 } 

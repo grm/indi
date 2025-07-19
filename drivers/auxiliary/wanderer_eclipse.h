@@ -73,12 +73,20 @@ private:
     // Cap state
     bool isOpen = false;
     int torqueLevel = 1; // Default to medium
+    double voltageValue = 0.0; // Device voltage
 
     // Firmware information
     INDI::PropertyText FirmwareTP{1};
     enum
     {
         FIRMWARE_VERSION,
+    };
+
+    // Voltage information
+    INDI::PropertyNumber VoltageNP{1};
+    enum
+    {
+        VOLTAGE,
     };
 
     int PortFD{ -1 };
